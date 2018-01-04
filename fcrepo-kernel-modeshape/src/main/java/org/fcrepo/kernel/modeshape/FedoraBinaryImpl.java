@@ -36,7 +36,6 @@ import org.fcrepo.kernel.api.RdfStream;
 import org.fcrepo.kernel.api.utils.CacheEntry;
 import org.fcrepo.kernel.api.utils.ContentDigest;
 import org.fcrepo.kernel.api.utils.FixityResult;
-import org.fcrepo.kernel.api.utils.MessageExternalBodyContentType;
 import org.fcrepo.kernel.modeshape.rdf.impl.FixityRdfContext;
 import org.fcrepo.kernel.modeshape.utils.FedoraTypesUtils;
 import org.fcrepo.kernel.modeshape.utils.impl.CacheEntryFactory;
@@ -397,17 +396,8 @@ public class FedoraBinaryImpl extends FedoraResourceImpl implements FedoraBinary
 
         try (final Timer.Context context = timer.time()) {
 
-            final String mimeType = getMimeType();
-            if (mimeType.contains(MessageExternalBodyContentType.MEDIA_TYPE)) {
-                final MessageExternalBodyContentType externalBody = MessageExternalBodyContentType.parse(mimeType);
-                final String resourceLocation = externalBody.getResourceLocation();
-                LOGGER.debug("Checking external resource: " + resourceLocation);
-                return CacheEntryFactory.forProperty(getProperty(HAS_MIME_TYPE)).checkFixity(algorithms);
-            } else {
-
-                LOGGER.debug("Checking resource: " + getPath());
-                return CacheEntryFactory.forProperty(getProperty(JCR_DATA)).checkFixity(algorithms);
-            }
+            LOGGER.debug("Checking resource: " + getPath());
+            return CacheEntryFactory.forProperty(getProperty(JCR_DATA)).checkFixity(algorithms);
         } catch (final RepositoryException e) {
             throw new RepositoryRuntimeException(e);
         }

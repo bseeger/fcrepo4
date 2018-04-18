@@ -18,6 +18,9 @@
 
 package org.fcrepo.kernel.api.utils;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -79,7 +82,9 @@ public class MessageExternalBodyContentType {
      * @param contentType content type
      * @return true if the contentType vale contains the message/external-body type
      */
+
     public static boolean isExternalBodyType(final String contentType) {
+
         return contentType != null && contentType.startsWith(MEDIA_TYPE);
     }
 
@@ -111,12 +116,36 @@ public class MessageExternalBodyContentType {
     private final String expiration;
 
     private MessageExternalBodyContentType(final String accessType, final String resourceLocation,
-            final String mimeType, final String expiration) {
+                                           final String mimeType, final String expiration) {
         this.accessType = accessType;
         this.resourceLocation = resourceLocation;
         this.mimeType = mimeType;
         this.expiration = expiration;
     }
+
+    /**
+     * Fetches content in the case of copy
+     */
+    public InputStream getExternalContent(URI uri) {
+
+        try {
+            String dsMimeType = parsedContentType.getMimeType();
+            if (dsMimeType == null || dsMimeType.isEmpty()) {
+                dsMimeType = "application/octet-stream";
+            }
+
+            final InputStream externalStream = URI.openStream();
+
+            getBinary(dsMimeType).setContent(externalStream, dsMimeType, checksums, originalFileName,
+                    storagePolicyDecisionPoint);
+            return;
+        } catch (final UnsupportedAccessTypeException e) {
+            throw new RepositoryRuntimeException(e);
+        } catch (final IOException e) {
+            throw new RepositoryRuntimeException(e);
+        }
+    }
+
 
     /**
      * @return

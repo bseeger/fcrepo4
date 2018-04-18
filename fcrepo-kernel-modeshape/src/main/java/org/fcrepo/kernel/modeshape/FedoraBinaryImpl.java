@@ -165,8 +165,8 @@ public class FedoraBinaryImpl extends FedoraResourceImpl implements FedoraBinary
 
         // Clear the wrapped binary object prior to setting the content
         wrappedBinary = null;
-
-        if (MessageExternalBodyContentType.isExternalBodyType(contentType)) {
+/*
+        if (isCopy()) {
             try {
                 final MessageExternalBodyContentType parsedContentType = MessageExternalBodyContentType.parse(
                         contentType);
@@ -192,6 +192,7 @@ public class FedoraBinaryImpl extends FedoraResourceImpl implements FedoraBinary
                 throw new RepositoryRuntimeException(e);
             }
         }
+        */
 
         getBinary(contentType).setContent(content, contentType, checksums, originalFileName,
                 storagePolicyDecisionPoint);

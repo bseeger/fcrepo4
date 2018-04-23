@@ -113,18 +113,7 @@ import org.fcrepo.http.commons.domain.ContentLocation;
 import org.fcrepo.http.commons.domain.PATCH;
 import org.fcrepo.kernel.api.FedoraTypes;
 import org.fcrepo.kernel.api.RdfStream;
-import org.fcrepo.kernel.api.exception.AccessDeniedException;
-import org.fcrepo.kernel.api.exception.CannotCreateResourceException;
-import org.fcrepo.kernel.api.exception.ConstraintViolationException;
-import org.fcrepo.kernel.api.exception.InsufficientStorageException;
-import org.fcrepo.kernel.api.exception.InvalidACLException;
-import org.fcrepo.kernel.api.exception.InteractionModelViolationException;
-import org.fcrepo.kernel.api.exception.InvalidChecksumException;
-import org.fcrepo.kernel.api.exception.MalformedRdfException;
-import org.fcrepo.kernel.api.exception.PathNotFoundRuntimeException;
-import org.fcrepo.kernel.api.exception.RepositoryRuntimeException;
-import org.fcrepo.kernel.api.exception.UnsupportedAccessTypeException;
-import org.fcrepo.kernel.api.exception.UnsupportedAlgorithmException;
+import org.fcrepo.kernel.api.exception.*;
 import org.fcrepo.kernel.api.models.Container;
 import org.fcrepo.kernel.api.models.FedoraBinary;
 import org.fcrepo.kernel.api.models.FedoraResource;
@@ -211,7 +200,12 @@ public class FedoraLdp extends ContentExposingResource {
             final MediaType mediaType = getBinaryResourceMediaType();
 
             if (((FedoraBinary)resource()).isRedirect()) {
-                builder = temporaryRedirect(((FedoraBinary)resource()).getRedirectURI());
+                try {
+                    builder = temporaryRedirect(new URI(((FedoraBinary) resource()).getRedirectURL()));
+                } catch (Exception e) {
+                    throw new ExternalMessageBodyException("Redirect URL Failed for " + externalPath  + " : " +
+                            ((FedoraBinary)resource).getRedirectURL());
+                }
             }
 
             //todo -- we may not want this header info on a redirect
@@ -374,11 +368,6 @@ public class FedoraLdp extends ContentExposingResource {
 
         final String interactionModel = checkInteractionModel(links);
 
-        final String extContentLinkHeader = ExternalContent.findExternalLink(links);
-        if (extContentLinkHeader != null) {
-            ExternalContent.verifyRequestForExternalBody(extContentLinkHeader);
-        }
-
         final URI resourceAcl = checkForAclLink(links);
         if (resourceAcl != null) {
             checkAclUriExistsAndHasCorrectType(resourceAcl);
@@ -394,7 +383,12 @@ public class FedoraLdp extends ContentExposingResource {
 
             final Collection<String> checksums = parseDigestHeader(digest);
 
-            final MediaType contentType =  getSimpleContentType(requestContentType, extContentLinkHeader);
+            final String extContentLinkHeader = ExternalContentHandler.findExternalLink(links);
+            final ExternalContentHandler extContent = extContentLinkHeader != null ?
+                    new ExternalContentHandler(extContentLinkHeader) : null;
+
+            final MediaType contentType =  getSimpleContentType(
+                    extContent != null ? extContent.getContentType() : requestContentType);
 
             if (nodeService.exists(session.getFedoraSession(), path)) {
                 resource = resource();
@@ -405,10 +399,22 @@ public class FedoraLdp extends ContentExposingResource {
                     throw new InteractionModelViolationException("Changing the interaction model " + resInteractionModel
                                 + " to " + interactionModel + " is not allowed!");
                 }
+
+                // if it's an existing resource with new body content, make sure that it wasn't a
+                // Proxy or Redirect. Adjust if it was.
+                if (resource instanceof FedoraBinary && extContent != null) {
+                    if(((FedoraBinary)resource).isProxy()) {
+                        LOGGER.info("Binary that was proxy shifting to internal content {}", externalPath);
+                        ((FedoraBinary)resource).setProxyURL(null);
+                    } else if (((FedoraBinary)resource).isRedirect()) {
+                        LOGGER.info("Binary that was redirect shifting to internal content {}", externalPath);
+                        ((FedoraBinary)resource).setRedirectURL(null);
+                    }
+                }
             } else {
                 // requestBodyStream never appears to be null, even when not providing a body
-                resource = createFedoraResource(path, interactionModel, contentType,
-                        !(requestBodyStream == null || requestContentType == null));
+                resource = createFedoraResource(path, interactionModel, requestContentType,
+                        !(requestBodyStream == null || requestContentType == null), extContent);
             }
 
             if (httpConfiguration.putRequiresIfMatch() && StringUtils.isBlank(ifMatch) && !resource.isNew()) {
@@ -424,10 +430,22 @@ public class FedoraLdp extends ContentExposingResource {
                 if (resource instanceof FedoraBinary) {
                     InputStream stream = requestBodyStream;
                     MediaType type = requestContentType;
-                    if (extContentLinkHeader != null && ExternalContent.isCopy(extContentLinkHeader)) {
-                        stream = ExternalContent.fetchExternalContent(extContentLinkHeader);
-                        type = contentType;
+                    // override a few things, if it's external content
+                    if (extContent != null) {
+                        LOGGER.info("PUT resource external content '{}'", externalPath);
+                        if(extContent.isCopy()) {
+                            LOGGER.debug("PUT resource external content COPY '{}'", externalPath);
+                            stream = extContent.fetchExternalContent();
+                        } else if (extContent.isProxy()) {
+                            LOGGER.debug("PUT resource external content PROXY '{}'", externalPath);
+                            ((FedoraBinary) resource).setProxyURL(extContent.getURL());
+                        } else if (extContent.isRedirect()) {
+                            LOGGER.debug("PUT resource external content REDIRECT'{}'", externalPath);
+                            ((FedoraBinary) resource).setRedirectURL(extContent.getURL());
+                        }
+                        type = contentType;  // if external at all, then this holds the right value already
                     }
+
                     replaceResourceBinaryWithStream((FedoraBinary) resource,
                             stream, contentDisposition, type, checksums);
                 } else if (isRdfContentType(contentType.toString())) {
@@ -592,10 +610,9 @@ public class FedoraLdp extends ContentExposingResource {
         final String interactionModel = checkInteractionModel(links);
 
         // If request is an external binary, verify link header before proceeding
-        final String extContentLinkHeader = ExternalContent.findExternalLink(links);
-        if (extContentLinkHeader != null) {
-            ExternalContent.verifyRequestForExternalBody(extContentLinkHeader);
-        }
+        final String extContentLinkHeader = ExternalContentHandler.findExternalLink(links);
+        final ExternalContentHandler extContent = extContentLinkHeader != null ?
+                new ExternalContentHandler(extContentLinkHeader) : null;
 
         final URI resourceAcl = checkForAclLink(links);
         if (resourceAcl != null) {
@@ -608,7 +625,8 @@ public class FedoraLdp extends ContentExposingResource {
             throw new ClientErrorException("Objects cannot be created under pairtree nodes", FORBIDDEN);
         }
 
-        final MediaType contentType = getSimpleContentType(requestContentType, extContentLinkHeader);
+        final MediaType contentType = getSimpleContentType(
+                extContent != null ? extContent.getContentType() : requestContentType);
 
         final String contentTypeString = contentType.toString();
 
@@ -624,12 +642,12 @@ public class FedoraLdp extends ContentExposingResource {
             LOGGER.info("Ingest with path: {}", newObjectPath);
 
             resource = createFedoraResource(newObjectPath, interactionModel, contentType,
-                    !(requestBodyStream == null || requestContentType == null));
+                    !(requestBodyStream == null || requestContentType == null), extContent);
 
             try (final RdfStream resourceTriples =
                      resource.isNew() ? new DefaultRdfStream(asNode(resource())) : getResourceTriples()) {
 
-                if (requestBodyStream == null) {
+                if (requestBodyStream == null && extContent == null) {
                     LOGGER.trace("No request body detected");
                 } else {
                     LOGGER.trace("Received createObject with a request body and content type \"{}\"",
@@ -640,14 +658,24 @@ public class FedoraLdp extends ContentExposingResource {
                     } else if (resource instanceof FedoraBinary) {
                         LOGGER.trace("Created a datastream and have a binary payload.");
 
+                        if (requestBodyStream != null && extContent != null) {
+                            throw new ExternalMessageBodyException("Body included in request.");
+                        }
+
                         InputStream stream = requestBodyStream;
-                        if (extContentLinkHeader != null && ExternalContent.isCopy(extContentLinkHeader)) {
-                            // grab the content and hand it on in
-                            stream = ExternalContent.fetchExternalContent(extContentLinkHeader);
+
+                        if (extContent.isCopy()) {
+                            LOGGER.debug("POST copying data {} ", externalPath);
+                            stream = extContent.fetchExternalContent();
+                        } else if (extContent.isProxy()) {
+                            ((FedoraBinary)resource).setProxyURL(extContent.getURL());
+                        } else if (extContent.isRedirect()) {
+                            ((FedoraBinary)resource).setRedirectURL(extContent.getURL());
                         }
 
                         replaceResourceBinaryWithStream((FedoraBinary) resource,
-                                stream, contentDisposition, requestContentType, checksum);
+                                stream, contentDisposition, requestContentType, checksum,
+                                extContent.isProxy(), extContent.isRedirect());
 
                     } else if (contentTypeString.equals(contentTypeSPARQLUpdate)) {
                         LOGGER.trace("Found SPARQL-Update content, applying..");
@@ -887,12 +915,12 @@ public class FedoraLdp extends ContentExposingResource {
     }
 
     private FedoraResource createFedoraResource(final String path, final String interactionModel,
-            final MediaType contentType, final boolean contentPresent) {
+            final MediaType contentType, final boolean contentPresent, ExternalContentHandler extContent) {
 
         final MediaType simpleContentType = contentPresent ? getSimpleContentType(contentType) : null;
 
         final FedoraResource result;
-        if ("ldp:NonRDFSource".equals(interactionModel) ||
+        if ("ldp:NonRDFSource".equals(interactionModel) || extContent != null ||
                 (contentPresent && interactionModel == null && !isRDF(simpleContentType))) {
             result = binaryService.findOrCreate(session.getFedoraSession(), path);
         } else {

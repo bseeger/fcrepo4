@@ -37,8 +37,6 @@ import java.io.InputStream;
 import java.net.URI;
 import java.util.Collection;
 
-import static org.apache.jena.datatypes.xsd.XSDDatatype.XSDstring;
-import static org.fcrepo.kernel.modeshape.FedoraJcrConstants.FIELD_DELIMITER;
 import static org.fcrepo.kernel.modeshape.utils.FedoraTypesUtils.isFedoraBinary;
 import static org.slf4j.LoggerFactory.getLogger;
 
@@ -67,20 +65,9 @@ public class FedoraBinaryImpl extends FedoraResourceImpl implements FedoraBinary
     /**
      * Get the proxied binary content object wrapped by this object
      *
-     * @return
+     * @return the fedora binary
      */
     private FedoraBinary getBinary() {
-        return getBinary(null);
-    }
-
-    /**
-     * Get the proxied binary content object wrapped by this object, with the provided content type as a hint
-     * regarding the type storage implementation.
-     *
-     * @param contentType
-     * @return
-     */
-    private FedoraBinary getBinary(final String contentType) {
         if (wrappedBinary == null) {
             wrappedBinary = getBinaryImplementation();
             LOGGER.debug("Wrapping binary content of type {}", wrappedBinary.getClass().getName());
@@ -106,7 +93,7 @@ public class FedoraBinaryImpl extends FedoraResourceImpl implements FedoraBinary
 */
     private FedoraBinary getBinaryImplementation() {
         final String url = getURLInfo();
-
+        LOGGER.debug("getBinaryImplementation: url is '{}'",url);
         if (url != null) {
             if (url.toLowerCase().startsWith(LOCAL_FILE_ACCESS_TYPE)) {
                 LOGGER.debug("Instantiating local file FedoraBinary");
@@ -117,6 +104,7 @@ public class FedoraBinaryImpl extends FedoraResourceImpl implements FedoraBinary
             }
         }
 
+        LOGGER.debug("Instantiating Internal Fedora Binary");
         return new InternalFedoraBinary(getNode());
     }
 
@@ -187,7 +175,7 @@ public class FedoraBinaryImpl extends FedoraResourceImpl implements FedoraBinary
         }
         */
 
-        getBinary(contentType).setContent(content, contentType, checksums, originalFileName,
+        getBinary().setContent(content, contentType, checksums, originalFileName,
                 storagePolicyDecisionPoint);
     }
 
@@ -216,10 +204,7 @@ public class FedoraBinaryImpl extends FedoraResourceImpl implements FedoraBinary
      */
     @Override
     public Boolean isProxy() {
-        if (hasProperty(PROXY_FOR)) {
-            return true;
-        }
-        return false;
+        return hasProperty(PROXY_FOR);
     }
 
     /*
@@ -228,10 +213,7 @@ public class FedoraBinaryImpl extends FedoraResourceImpl implements FedoraBinary
      */
     @Override
     public Boolean isRedirect() {
-        if (hasProperty(REDIRECTS_TO)) {
-            return true;
-        }
-        return false;
+        return hasProperty(REDIRECTS_TO);
     }
 
     /*
@@ -255,13 +237,10 @@ public class FedoraBinaryImpl extends FedoraResourceImpl implements FedoraBinary
      * @see org.fcrepo.kernel.api.models.FedoraBinary#setProxyURL()
      */
     @Override
-    public void setProxyURL(String url) throws RepositoryRuntimeException {
+    public void setProxyURL(final String url) throws RepositoryRuntimeException {
         try {
             getNode().setProperty(PROXY_FOR, url);
-
-            if (url != null) {
-                getNode().setProperty(REDIRECTS_TO, (Value)null);
-            }
+            getNode().setProperty(REDIRECTS_TO, (Value)null);
         } catch (Exception e) {
             throw new RepositoryRuntimeException(e);
         }
@@ -288,13 +267,10 @@ public class FedoraBinaryImpl extends FedoraResourceImpl implements FedoraBinary
      * @see org.fcrepo.kernel.api.models.FedoraBinary#setRedirectURL()
      */
     @Override
-    public void setRedirectURL(String url) throws RepositoryRuntimeException {
+    public void setRedirectURL(final String url) throws RepositoryRuntimeException {
         try {
             getNode().setProperty(REDIRECTS_TO, url);
-
-            if (url != null) {
-                getNode().setProperty(PROXY_FOR, (Value)null);
-            }
+            getNode().setProperty(PROXY_FOR, (Value)null);
         } catch (Exception e) {
             throw new RepositoryRuntimeException(e);
         }

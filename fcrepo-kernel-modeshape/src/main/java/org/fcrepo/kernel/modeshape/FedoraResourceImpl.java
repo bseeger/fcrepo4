@@ -842,7 +842,26 @@ public class FedoraResourceImpl extends JcrTools implements FedoraTypes, FedoraR
             model.register(new PropertyChangedListener(resource, propertyChanged));
         });
 
-        model.setNsPrefixes(request.getPrefixMapping());
+        // ensure that every url ends with '#'
+        final Map<String, String> prefixMap = request.getPrefixMapping().getNsPrefixMap().entrySet()
+            .stream()
+            .collect(Collectors.toMap(
+                entry -> entry.getKey(),
+                entry -> {
+                    LOGGER.debug("LOOK Prefix mapping is key:{} -> value:{}", entry.getKey(), entry.getValue());
+                    if (!entry.getValue().endsWith("#") && !entry.getValue().endsWith("/")) {
+                        LOGGER.debug("FIX Prefix mapping is key:{} -> value:{}", entry.getKey(), entry.getValue());
+                        return entry.getValue() + "#";
+                    }  else {
+                        return entry.getValue();
+                    }
+                }
+        ));
+
+        prefixMap.forEach( (k, v) -> LOGGER.debug("AFTER Prefix mapping is key:{} -> value:{}", k, v) );
+        LOGGER.debug("SPARQL:  \"{}\"", sparqlUpdateStatement);
+
+        model.setNsPrefixes(prefixMap);
         execute(request, model);
 
         removeEmptyFragments();
